@@ -164,6 +164,7 @@ def staff_dashboard(username):
     user_df = df[df["username"] == username]
 
     if not user_df.empty:
+	
         m = folium.Map(location=[user_df["lat"].iloc[-1], user_df["lon"].iloc[-1]], zoom_start=12)
         mc = MarkerCluster().add_to(m)
 
@@ -176,6 +177,13 @@ def staff_dashboard(username):
                 ).add_to(mc)
 
         st_folium(m, width=700, height=500)
+# ✅ Add summary for staff
+        total_km = user_df["km_travelled"].sum()
+        total_amt = user_df["collection_amount"].sum()
+        st.metric("Total KM Travelled", f"{total_km:.2f} km")
+        st.metric("Total Collection Amount", f"₹ {total_amt:.2f}")		
+  
+    
     else:
         st.info("No travel history yet.")
 
