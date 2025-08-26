@@ -1,13 +1,13 @@
-import streamlit as st 
+import streamlit as st
 import pandas as pd
 import folium
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
-from datetime import datetime, date
-from geopy.distance import geodesic
+from datetime import datetime
 import os
+import math
 
-# Try to get real GPS location
+# GPS location
 try:
     from streamlit_js_eval import get_geolocation
     GEO_AVAILABLE = True
@@ -19,202 +19,214 @@ DATA_FILE = "staff_locations.csv"
 # ------------------ DATA HANDLING ------------------
 def load_data():
     if os.path.exists(DATA_FILE):
-        df = pd.read_csv(DATA_FILE)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        for col in ["km_travelled", "collection_amount", "customer_name", "product"]:
-            if col not in df.columns:
-                if col in ["customer_name", "product"]:
-                    df[col] = ""
-                else:
-                    df[col] = 0.0
-        return df
+        return pd.read_csv(DATA_FILE)
     else:
         return pd.DataFrame(columns=[
-            "username", "role", "action", "lat", "lon", "timestamp",
-            "km_travelled", "collection_amount", "customer_name", "product"
+            "username","role","action","lat","lon","timestamp",
+            "km_travelled","collection_amount","customer_name","product"
         ])
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
 
-# ------------------ LOGIN SYSTEM ------------------
-USERS = {
-    "admin": {"password": "admin123", "role": "admin"},
-    "staff1": {"password": "staff123", "role": "staff"},
-    "staff2": {"password": "staff456", "role": "staff"}
+# ------------------ HELPER: DISTANCE ------------------
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth radius in km
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    c = 2*math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+# ------------------ AUTH ------------------
+# Username-specific credentials
+CREDENTIALS = {
+    "staff1": {"role": "staff", "password": "pwd1"},
+    "staff2": {"role": "staff", "password": "pwd2"},
+    "staff3": {"role": "staff", "password": "pwd3"},
+    "staff4": {"role": "staff", "password": "pwd4"},
+    "staff5": {"role": "staff", "password": "pwd5"},
+    "admin":  {"role": "admin", "password": "admin123"}
 }
 
 def login():
-    st.title("🔐 Staff Tracking Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if username in USERS and USERS[username]["password"] == password:
+    st.sidebar.header("Login")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+
+    if st.sidebar.button("Login"):
+        if username in CREDENTIALS and password == CREDENTIALS[username]["password"]:
             st.session_state["username"] = username
-            st.session_state["role"] = USERS[username]["role"]
-            st.success("Login successful ✅")
-            st.rerun()
+            st.session_state["role"] = CREDENTIALS[username]["role"]
+            st.success(f"Welcome {username} ({st.session_state['role']})")
         else:
-            st.error("Invalid username or password ❌")
+            st.error("Invalid credentials")
+
 
 # ------------------ STAFF DASHBOARD ------------------
 def staff_dashboard(username):
-    st.sidebar.title(f"👤 Staff: {username}")
-    st.title("🧑‍💼 Staff Dashboard")
-
+    st.header(f"Staff Dashboard - {username}")
     df = load_data()
 
+    # Auto GPS location
+    lat, lon = None, None
     if GEO_AVAILABLE:
         loc = get_geolocation()
-        lat, lon = None, None
         if loc and "coords" in loc:
             lat = loc["coords"]["latitude"]
             lon = loc["coords"]["longitude"]
-    else:
-        lat = st.number_input("Latitude", value=0.0)
-        lon = st.number_input("Longitude", value=0.0)
 
-    # --- Helper to calculate KM travelled ---
-    def calculate_km(df, username, lat, lon):
-        user_data = df[df["username"] == username]
-        if user_data.empty:
-            return 0.0
-        last_row = user_data.iloc[-1]
-        if pd.isna(last_row["lat"]) or pd.isna(last_row["lon"]):
-            return 0.0
-        prev_point = (last_row["lat"], last_row["lon"])
-        curr_point = (lat, lon)
-        return geodesic(prev_point, curr_point).km
+    col1, col2, col3 = st.columns(3)
 
-    # Today's Data
-    today_data = df[(df["username"] == username) &
-                    (df["timestamp"].dt.date == datetime.now().date())]
+    # Punch In (required before Clock In)
+    with col1:
+        if st.button("Punch In"):
+            new_row = {
+                "username": username,
+                "role": "staff",
+                "action": "punch_in",
+                "lat": lat,
+                "lon": lon,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "km_travelled": 0,
+                "collection_amount": 0,
+                "customer_name": "",
+                "product": ""
+            }
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            save_data(df)
+            st.success("Punch In recorded")
 
-    # ✅ Daily Summary at top
-    if not today_data.empty:
-        total_km = today_data["km_travelled"].sum()
-        total_collection = today_data["collection_amount"].sum()
-        st.subheader("📊 Daily Summary")
-        st.write(f"**Total KM Travelled:** {total_km:.2f} km")
-        st.write(f"**Total Collection:** ₹{total_collection:.2f}")
+    # Clock In (visit/customer)
+    with col2:
+        cust = st.text_input("Customer Name")
+        prod = st.text_input("Product")
+        amt = st.number_input("Collection Amount", min_value=0)
+        if st.button("Clock In"):
+            km = 0
+            user_df = df[df["username"] == username]
+            if not user_df.empty and pd.notna(lat) and pd.notna(lon):
+                prev = user_df.iloc[-1]
+                if pd.notna(prev["lat"]) and pd.notna(prev["lon"]):
+                    km = haversine(prev["lat"], prev["lon"], lat, lon)
 
-    # Punch In
-    if st.button("📍 Punch In"):
-        km = calculate_km(df, username, lat, lon)
-        new_row = pd.DataFrame([[username, "staff", "punch_in", lat, lon, datetime.now(), km, 0.0, "", ""]],
-                               columns=df.columns)
-        df = pd.concat([df, new_row], ignore_index=True)
-        save_data(df)
-        st.success("Punched In successfully ✅")
+            new_row = {
+                "username": username,
+                "role": "staff",
+                "action": "clock_in",
+                "lat": lat,
+                "lon": lon,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "km_travelled": km,
+                "collection_amount": amt,
+                "customer_name": cust,
+                "product": prod
+            }
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            save_data(df)
+            st.success(f"Clock In recorded (Travel: {km:.2f} km)")
 
-    # Clock In
-    st.subheader("💰 Collection Entry")
-    customer_name = st.text_input("Customer Name")
-    product = st.text_input("Product")
-    collection = st.number_input("Enter Collection Amount (₹)", value=0.0)
+    # Clock Out (end of day)
+    with col3:
+        if st.button("Clock Out"):
+            km = 0
+            user_df = df[df["username"] == username]
+            if not user_df.empty and pd.notna(lat) and pd.notna(lon):
+                prev = user_df.iloc[-1]
+                if pd.notna(prev["lat"]) and pd.notna(prev["lon"]):
+                    km = haversine(prev["lat"], prev["lon"], lat, lon)
 
-    if st.button("⏰ Clock In"):
-        km = calculate_km(df, username, lat, lon)
-        new_row = pd.DataFrame([[username, "staff", "clock_in", lat, lon, datetime.now(), km, collection, customer_name, product]],
-                               columns=df.columns)
-        df = pd.concat([df, new_row], ignore_index=True)
-        save_data(df)
-        st.success(f"Clocked In ✅ | KM: {km:.2f} | Customer: {customer_name} | Product: {product} | Collection: ₹{collection}")
+            new_row = {
+                "username": username,
+                "role": "staff",
+                "action": "clock_out",
+                "lat": lat,
+                "lon": lon,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "km_travelled": km,
+                "collection_amount": 0,
+                "customer_name": "",
+                "product": ""
+            }
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            save_data(df)
+            st.success(f"Clock Out recorded (Travel: {km:.2f} km)")
 
-    # Clock Out
-    if st.button("🛑 Clock Out"):
-        km = calculate_km(df, username, lat, lon)
-        new_row = pd.DataFrame([[username, "staff", "clock_out", lat, lon, datetime.now(), km, 0.0, "", ""]],
-                               columns=df.columns)
-        df = pd.concat([df, new_row], ignore_index=True)
-        save_data(df)
-        st.success("Clocked Out successfully ✅")
+    # Travel Map
+    st.subheader("Travel History Map")
+    user_df = df[df["username"] == username]
 
-    # Today's Map
-    st.subheader("📌 Today's Travel Map")
-    if today_data.empty:
-        st.warning("No location data for today yet.")
-    else:
-        m = folium.Map(location=[today_data.iloc[-1]["lat"], today_data.iloc[-1]["lon"]], zoom_start=12)
-        marker_cluster = MarkerCluster().add_to(m)
-        for _, row in today_data.iterrows():
-            popup_text = (f"{row['action']} @ {row['timestamp']} | "
-                          f"KM: {row['km_travelled']:.2f} | "
-                          f"Customer: {row['customer_name']} | "
-                          f"Product: {row['product']} | "
-                          f"Collection: ₹{row['collection_amount']}")
-            folium.Marker([row["lat"], row["lon"]], popup=popup_text).add_to(marker_cluster)
+    if not user_df.empty:
+        m = folium.Map(location=[user_df["lat"].iloc[-1], user_df["lon"].iloc[-1]], zoom_start=12)
+        mc = MarkerCluster().add_to(m)
+
+        for _, row in user_df.iterrows():
+            if pd.notna(row["lat"]) and pd.notna(row["lon"]):
+                folium.Marker(
+                    location=[row["lat"], row["lon"]],
+                    popup=f"{row['action']} @ {row['timestamp']}<br>Cust:{row['customer_name']} Amt:{row['collection_amount']}<br>KM:{row['km_travelled']:.2f}",
+                    tooltip=row["action"]
+                ).add_to(mc)
+
         st_folium(m, width=700, height=500)
+    else:
+        st.info("No travel history yet.")
 
 # ------------------ ADMIN DASHBOARD ------------------
 def admin_dashboard():
-    st.sidebar.title("🛠️ Admin Panel")
-    st.title("📊 Admin Dashboard")
-
+    st.header("Admin Dashboard")
     df = load_data()
 
     if df.empty:
-        st.warning("No staff data available yet.")
+        st.warning("No data available")
         return
 
-    # Filters
-    st.subheader("🔎 Filter Data")
-    selected_date = st.date_input("Select Date", value=date.today())
-    staff_list = ["All"] + sorted(df["username"].unique().tolist())
-    selected_staff = st.selectbox("Select Staff", staff_list)
+    staff_list = df["username"].unique().tolist()
+    staff_filter = st.selectbox("Filter by Staff", ["All"] + staff_list)
 
-    # Apply filters
-    filtered_df = df[df["timestamp"].dt.date == selected_date]
-    if selected_staff != "All":
-        filtered_df = filtered_df[filtered_df["username"] == selected_staff]
+    if staff_filter != "All":
+        df = df[df["username"] == staff_filter]
 
-    if filtered_df.empty:
-        st.warning("No data available for selected filters.")
-        return
-
-    # ✅ Daily Totals Table
-    summary = filtered_df.groupby("username").agg(
-        Total_KM=("km_travelled", "sum"),
-        Total_Collection=("collection_amount", "sum")
+    # Summary stats
+    st.subheader("Summary")
+    summary = df.groupby("username").agg(
+        total_km=("km_travelled","sum"),
+        total_amount=("collection_amount","sum"),
+        visits=("action","count")
     ).reset_index()
-
-    st.subheader("📊 Daily Totals per Staff")
     st.dataframe(summary)
 
-    # Records Table
-    st.subheader("📋 Staff Records")
-    st.dataframe(filtered_df)
+    # Detailed logs
+    st.subheader("Detailed Records")
+    st.dataframe(df)
 
     # Map
-    st.subheader("🌍 Staff Travel Map")
-    m = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
-    marker_cluster = MarkerCluster().add_to(m)
-    for _, row in filtered_df.iterrows():
-        popup_text = (f"{row['username']} - {row['action']} @ {row['timestamp']} | "
-                      f"KM: {row['km_travelled']:.2f} | "
-                      f"Customer: {row['customer_name']} | "
-                      f"Product: {row['product']} | "
-                      f"Collection: ₹{row['collection_amount']}")
-        folium.Marker([row["lat"], row["lon"]], popup=popup_text).add_to(marker_cluster)
-    st_folium(m, width=700, height=500)
+    if not df.empty:
+        m = folium.Map(location=[df["lat"].mean(), df["lon"].mean()], zoom_start=7)
+        mc = MarkerCluster().add_to(m)
+
+        for _, row in df.iterrows():
+            if pd.notna(row["lat"]) and pd.notna(row["lon"]):
+                folium.Marker(
+                    location=[row["lat"], row["lon"]],
+                    popup=f"{row['username']} - {row['action']} @ {row['timestamp']}<br>Cust:{row['customer_name']} Amt:{row['collection_amount']}<br>KM:{row['km_travelled']:.2f}",
+                    tooltip=row["action"]
+                ).add_to(mc)
+
+        st_folium(m, width=800, height=600)
 
 # ------------------ MAIN ------------------
 def main():
+    st.title("Staff Location Tracking")
+
     if "username" not in st.session_state:
         login()
     else:
-        role = st.session_state["role"]
-        username = st.session_state["username"]
-
-        st.sidebar.write(f"Logged in as: {username} ({role})")
-        if st.sidebar.button("🚪 Logout"):
-            del st.session_state["username"]
-            del st.session_state["role"]
-            st.rerun()
-
-        if role == "staff":
-            staff_dashboard(username)
-        elif role == "admin":
+        if st.session_state["role"] == "staff":
+            staff_dashboard(st.session_state["username"])
+        else:
             admin_dashboard()
 
 if __name__ == "__main__":
