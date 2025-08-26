@@ -22,7 +22,7 @@ def load_data():
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         return df
     else:
-        return pd.DataFrame(columns=["username", "role", "action", "lat", "lon", "timestamp","Totalkm travelled"])
+        return pd.DataFrame(columns=["username", "role", "action", "lat", "lon", "timestamp"])
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
