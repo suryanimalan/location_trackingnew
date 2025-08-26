@@ -64,6 +64,11 @@ def login():
         else:
             st.error("Invalid credentials")
 
+# ------------------ LOGOUT ------------------
+def logout():
+    if st.sidebar.button("Logout"):
+        st.session_state.clear()
+        st.rerun()   # ✅ updated for new Streamlit versions
 
 # ------------------ STAFF DASHBOARD ------------------
 def staff_dashboard(username):
@@ -224,6 +229,9 @@ def main():
     if "username" not in st.session_state:
         login()
     else:
+        # ✅ Logout button in sidebar
+        logout()
+
         if st.session_state["role"] == "staff":
             staff_dashboard(st.session_state["username"])
         else:
