@@ -40,7 +40,7 @@ def save_data(df):
 # ------------------ LOGIN SYSTEM ------------------
 USERS = {
     "admin": {"password": "admin123", "role": "admin"},
-    "surya": {"password": "surya1708", "role": "staff"},
+    "staff1": {"password": "staff123", "role": "staff"},
     "staff2": {"password": "staff456", "role": "staff"}
 }
 
