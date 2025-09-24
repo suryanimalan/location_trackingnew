@@ -220,14 +220,17 @@ def staff_dashboard(username):
             save_data(df)
             st.success(f"Clock Out recorded (Travel: {km:.2f} km)")
 
-    # ------------------ MAP + SUMMARY ------------------
+        # ------------------ MAP + SUMMARY ------------------
     st.subheader("Travel History Map")
     user_df = df[df["username"] == username]
     if not user_df.empty:
         m = folium.Map(location=[user_df["lat"].iloc[-1], user_df["lon"].iloc[-1]], zoom_start=12)
         mc = MarkerCluster().add_to(m)
+
+        coords = []  # store lat/lon for line
         for _, row in user_df.iterrows():
             if pd.notna(row["lat"]) and pd.notna(row["lon"]):
+                coords.append([row["lat"], row["lon"]])
                 folium.Marker(
                     location=[row["lat"], row["lon"]],
                     popup=(f"{row['action']} @ {row['timestamp']}<br>"
@@ -237,6 +240,13 @@ def staff_dashboard(username):
                            f"KM:{row['km_travelled']:.2f}"),
                     tooltip=row["action"]
                 ).add_to(mc)
+
+        # 🔹 Add travel line (PolyLine) if multiple points
+        if len(coords) > 1:
+            folium.PolyLine(
+                coords, color="blue", weight=3, opacity=0.7
+            ).add_to(m)
+
         st_folium(m, width=700, height=500)
 
         total_km = user_df["km_travelled"].sum()
@@ -245,6 +255,7 @@ def staff_dashboard(username):
         st.metric("Total Collection Amount", f"₹ {total_amt:.2f}")
     else:
         st.info("No travel history yet.")
+
 
 # ------------------ ADMIN DASHBOARD ------------------
 def admin_dashboard():
