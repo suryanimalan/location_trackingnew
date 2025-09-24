@@ -312,12 +312,18 @@ def admin_dashboard():
     st.subheader("Detailed Records")
     st.dataframe(df)
 
-    # ------------------ MAP ------------------
+        # ------------------ MAP ------------------
     if not df.empty:
         m = folium.Map(location=[df["lat"].mean(), df["lon"].mean()], zoom_start=7)
         mc = MarkerCluster().add_to(m)
-        for _, row in df.iterrows():
-            if pd.notna(row["lat"]) and pd.notna(row["lon"]):
+
+        # 🔹 Staff-wise group
+        for staff, staff_df in df.groupby("username"):
+            staff_df = staff_df.dropna(subset=["lat","lon"]).sort_values("timestamp")
+            coords = staff_df[["lat","lon"]].values.tolist()
+
+            # Staff route markers
+            for _, row in staff_df.iterrows():
                 folium.Marker(
                     location=[row["lat"], row["lon"]],
                     popup=(f"{row['username']} - {row['action']} @ {row['timestamp']}<br>"
@@ -325,9 +331,21 @@ def admin_dashboard():
                            f"Date:{row['pt_date']}<br>"
                            f"PTP:{row['ptp_feedback']}<br>"
                            f"KM:{row['km_travelled']:.2f}"),
-                    tooltip=row["action"]
+                    tooltip=f"{row['username']} ({row['action']})"
                 ).add_to(mc)
+
+            # 🔹 Staff travel line
+            if len(coords) > 1:
+                folium.PolyLine(
+                    coords,
+                    color="blue",   # optional: assign unique color per staff
+                    weight=3,
+                    opacity=0.6,
+                    tooltip=f"Path of {staff}"
+                ).add_to(m)
+
         st_folium(m, width=800, height=600)
+
 
 # ------------------ MAIN ------------------
 def main():
